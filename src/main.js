@@ -246,11 +246,61 @@ async function loginWithHttp() {
   }
 }
 
+// Parse cookie string into cookie objects for Playwright
+function parseCookies(cookieString) {
+  if (!cookieString) return [];
+  
+  const cookies = [];
+  // Split by comma but not within values (e.g., dates have commas)
+  const parts = cookieString.split(/,\s*(?=[A-Za-z_-]+=)/);
+  
+  for (const part of parts) {
+    const [nameValue, ...attrs] = part.split(';');
+    const [name, ...valueParts] = nameValue.split('=');
+    const value = valueParts.join('='); // Handle values with = in them
+    
+    if (!name || !value) continue;
+    
+    const cookie = {
+      name: name.trim(),
+      value: value.trim(),
+      domain: '.kravet.com',
+      path: '/'
+    };
+    
+    // Parse attributes
+    for (const attr of attrs) {
+      const [key, val] = attr.split('=').map(s => s?.trim());
+      if (key?.toLowerCase() === 'path' && val) cookie.path = val;
+      if (key?.toLowerCase() === 'domain' && val) cookie.domain = val;
+      if (key?.toLowerCase() === 'secure') cookie.secure = true;
+      if (key?.toLowerCase() === 'httponly') cookie.httpOnly = true;
+    }
+    
+    cookies.push(cookie);
+  }
+  
+  return cookies;
+}
+
+// Store session cookies globally
+let sessionCookiesParsed = [];
+
 // Main crawler
 const crawler = new PlaywrightCrawler({
   maxConcurrency,
   navigationTimeoutSecs: 120,
   requestHandlerTimeoutSecs: 300,
+  
+  // Inject cookies before each navigation
+  preNavigationHooks: [
+    async ({ page }, gotoOptions) => {
+      if (sessionCookiesParsed.length > 0) {
+        const context = page.context();
+        await context.addCookies(sessionCookiesParsed);
+      }
+    }
+  ],
   
   async requestHandler({ request, page, enqueueLinks, log }) {
     const { label, brand } = request.userData;
@@ -319,17 +369,48 @@ const crawler = new PlaywrightCrawler({
       await Actor.setValue(`listing-${brand}-page${request.userData.page || 1}`, screenshot, { contentType: 'image/png' });
       log.info(`📸 Saved debug screenshot for ${brand}`);
       
-      // Get product links - try Algolia selectors first, then Magento fallbacks
-      const productLinks = await page.$$eval(
-        `${algoliaSelectors.join(' a, ')} a, a.product-item-link, a[href*=".html"]`,
-        links => {
-          // Filter and dedupe
-          const urls = links
-            .map(a => a.href)
-            .filter(h => h && h.includes('.html') && !h.includes('login') && !h.includes('account') && !h.includes('cart'));
-          return [...new Set(urls)];
-        }
-      );
+      // Get product links - be very aggressive in finding them
+      const productLinks = await page.evaluate(() => {
+        const urls = new Set();
+        
+        // Method 1: All links containing product URL patterns
+        document.querySelectorAll('a[href]').forEach(a => {
+          const href = a.href;
+          // Kravet product URLs end in .html and often contain patterns like fabric names
+          if (href && href.includes('.html') && 
+              !href.includes('login') && 
+              !href.includes('account') && 
+              !href.includes('cart') &&
+              !href.includes('checkout') &&
+              !href.includes('wishlist') &&
+              !href.includes('customer') &&
+              href.includes('kravet.com')) {
+            // Check if it looks like a product page (has a product-like path)
+            const path = new URL(href).pathname;
+            // Product URLs are like /some-pattern-name.html at root level or /fabric/...
+            if (path.match(/^\/[a-z0-9-]+\.html$/i) || path.includes('/fabric/')) {
+              urls.add(href);
+            }
+          }
+        });
+        
+        // Method 2: Look for links inside common product container elements
+        const containerSelectors = [
+          '.product-item', '.product-card', '.hit', '.ais-Hits-item',
+          '[data-product-id]', '[data-insights-object-id]', 
+          '.product', '.item', '.product-listing'
+        ];
+        
+        containerSelectors.forEach(sel => {
+          document.querySelectorAll(sel + ' a[href]').forEach(a => {
+            if (a.href && a.href.includes('.html') && a.href.includes('kravet.com')) {
+              urls.add(a.href);
+            }
+          });
+        });
+        
+        return [...urls];
+      });
       
       log.info(`Found ${productLinks.length} products on page`);
       
@@ -769,6 +850,10 @@ console.log('🏁 Starting Kravet scraper...');
 const sessionCookies = await loginWithHttp();
 
 if (sessionCookies) {
+  // Parse cookies and store for injection
+  sessionCookiesParsed = parseCookies(sessionCookies);
+  console.log(`🍪 Parsed ${sessionCookiesParsed.length} cookies for Playwright injection`);
+  
   // If HTTP login worked, go straight to listing pages
   const startRequests = brands.map(brandKey => ({
     url: BRANDS[brandKey]?.shopUrl || BRANDS.kravet.shopUrl,
