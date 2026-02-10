@@ -171,6 +171,9 @@ async function saveToSupabase(item) {
             backorder: item.backorder
           },
           
+          // Spec Sheet PDF
+          spec_sheet_url: item.specSheetUrl,
+          
           // Meta
           meta: {
             description: item.metaDescription,
@@ -606,6 +609,19 @@ const crawler = new PlaywrightCrawler({
         // ===== DESCRIPTION =====
         const description = getText('.product-description, .description, [itemprop="description"], .product-info-description');
         
+        // ===== SPEC SHEET PDF =====
+        const specSheetUrl = getAttr('a[href*="spec"], a[href*="pdf"], a.spec-sheet, a[title*="Spec"], a[title*="spec"], .spec-sheet-link a', 'href') ||
+                            getAttr('a:contains("Spec Sheet"), a:contains("Print Spec")', 'href') ||
+                            (() => {
+                              const links = [...document.querySelectorAll('a')];
+                              const specLink = links.find(a => 
+                                (a.textContent || '').toLowerCase().includes('spec sheet') ||
+                                (a.textContent || '').toLowerCase().includes('print spec') ||
+                                (a.href || '').includes('.pdf')
+                              );
+                              return specLink?.href || '';
+                            })();
+        
         // ===== META DATA =====
         const metaDescription = getAttr('meta[name="description"]', 'content');
         const metaKeywords = getAttr('meta[name="keywords"]', 'content');
@@ -656,6 +672,9 @@ const crawler = new PlaywrightCrawler({
           
           // Related
           coordinates,
+          
+          // Spec Sheet
+          specSheetUrl,
           
           // Meta
           metaDescription,
