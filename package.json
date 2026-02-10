@@ -1,0 +1,18 @@
+{
+  "name": "kravet-scraper",
+  "version": "1.0.0",
+  "description": "Scrapes Kravet.com and all 6 brands (Kravet, Lee Jofa, Brunschwig & Fils, GP & J Baker, Andrew Martin, Cole & Son) with trade pricing",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "echo \"No tests yet\""
+  },
+  "dependencies": {
+    "apify": "^3.1.0",
+    "crawlee": "^3.5.0",
+    "playwright": "^1.40.0"
+  },
+  "author": "Rachel",
+  "license": "UNLICENSED"
+}

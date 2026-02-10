@@ -1,0 +1,13 @@
+{
+  "actorSpecification": 1,
+  "name": "kravet-scraper",
+  "title": "Kravet Fabrics Scraper",
+  "description": "Scrapes all 6 Kravet brands with trade account pricing. Saves to Supabase.",
+  "version": "1.0.0",
+  "buildTag": "latest",
+  "meta": {
+    "templateId": "js-playwright"
+  },
+  "input": "./INPUT_SCHEMA.json",
+  "dockerfile": "./Dockerfile"
+}

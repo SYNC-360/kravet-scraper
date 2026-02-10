@@ -1,0 +1,67 @@
+{
+  "title": "Kravet Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "email": {
+      "title": "Kravet Email",
+      "type": "string",
+      "description": "Trade account email",
+      "editor": "textfield"
+    },
+    "password": {
+      "title": "Kravet Password",
+      "type": "string",
+      "description": "Trade account password",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "brands": {
+      "title": "Brands to Scrape",
+      "type": "array",
+      "description": "Which brands to scrape",
+      "editor": "select",
+      "default": ["kravet"],
+      "items": {
+        "type": "string",
+        "enum": ["kravet", "leejofa", "brunschwig", "gpjbaker", "andrewmartin", "coleson"]
+      }
+    },
+    "maxProductsPerBrand": {
+      "title": "Max Products Per Brand",
+      "type": "integer",
+      "description": "Maximum products to scrape per brand",
+      "default": 10000,
+      "minimum": 1,
+      "maximum": 50000
+    },
+    "maxConcurrency": {
+      "title": "Max Concurrency",
+      "type": "integer",
+      "description": "Number of parallel browser pages",
+      "default": 2,
+      "minimum": 1,
+      "maximum": 10
+    },
+    "supabaseUrl": {
+      "title": "Supabase URL",
+      "type": "string",
+      "description": "Supabase project URL",
+      "editor": "textfield"
+    },
+    "supabaseKey": {
+      "title": "Supabase Key",
+      "type": "string",
+      "description": "Supabase service role key",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "skipSupabase": {
+      "title": "Skip Supabase",
+      "type": "boolean",
+      "description": "Skip saving to Supabase (for testing)",
+      "default": false
+    }
+  },
+  "required": []
+}
