@@ -323,10 +323,56 @@ const crawler = new PlaywrightCrawler({
         const getAttr = (sel, attr) => document.querySelector(sel)?.getAttribute(attr) || '';
         const getAllText = (sel) => [...document.querySelectorAll(sel)].map(el => el.textContent?.trim()).filter(Boolean);
         
-        // ===== BASIC INFO =====
-        const sku = getText('.product-sku, .sku-value, [itemprop="sku"], .product-info-sku .value') ||
-                   getText('.product-info-main .value') ||
-                   window.location.pathname.split('/').pop();
+        // ===== SKU (CRITICAL - must be exact Kravet SKU) =====
+        // Kravet SKUs follow patterns like: 33353.1.0, LJ-2024-5,?"pattern.color"
+        let sku = '';
+        
+        // Try multiple sources in priority order
+        const skuSources = [
+          // Direct SKU elements
+          getText('[itemprop="sku"]'),
+          getText('.product-sku .value'),
+          getText('.sku-value'),
+          getText('.product-info-sku .value'),
+          getText('.product-attribute-sku .value'),
+          getAttr('[data-sku]', 'data-sku'),
+          getAttr('[data-product-sku]', 'data-product-sku'),
+          
+          // From structured data
+          (() => {
+            const jsonLd = document.querySelector('script[type="application/ld+json"]');
+            if (jsonLd) {
+              try {
+                const data = JSON.parse(jsonLd.textContent);
+                return data.sku || data.productID || (data['@graph']?.[0]?.sku);
+              } catch (e) {}
+            }
+            return '';
+          })(),
+          
+          // From meta
+          getAttr('meta[property="product:retailer_item_id"]', 'content'),
+          
+          // From URL (last resort - Kravet often has SKU in URL)
+          (() => {
+            const urlPath = window.location.pathname;
+            // Match Kravet SKU patterns in URL
+            const skuMatch = urlPath.match(/([A-Z]{1,3}[-_]?\d{3,6}[-.]?\d*[-.]?\d*)/i) ||
+                            urlPath.match(/(\d{4,6}[-.]?\d+[-.]?\d*)/);
+            return skuMatch ? skuMatch[1] : '';
+          })()
+        ];
+        
+        // Get first non-empty SKU
+        for (const s of skuSources) {
+          if (s && s.trim() && s.length > 2) {
+            sku = s.trim();
+            break;
+          }
+        }
+        
+        // Clean SKU - remove common prefixes/suffixes
+        sku = sku.replace(/^(sku|item|product)[\s:_-]*/i, '').trim();
         
         const name = getText('h1.page-title, h1.product-name, [itemprop="name"], .product-info-main h1');
         const brand = getText('.product-brand, .brand-name, [data-brand]') || '';
@@ -361,14 +407,91 @@ const crawler = new PlaywrightCrawler({
         const unitMatch = priceText.match(/per\s+(yard|meter|roll|panel|each|repeat)/i);
         if (unitMatch) priceUnit = unitMatch[1].toLowerCase();
         
-        // ===== IMAGES =====
-        const primaryImage = getAttr('.product-image img, .gallery-placeholder img, [itemprop="image"], .fotorama__img, .product-media img', 'src') ||
-                            getAttr('.product-image img, .gallery-placeholder img', 'data-src');
+        // ===== IMAGES (must align with SKU) =====
+        // Get highest resolution versions available
+        const getImageUrl = (img) => {
+          // Priority: data-full > data-zoom > data-large > data-src > src
+          return img.getAttribute('data-full') ||
+                 img.getAttribute('data-zoom-image') ||
+                 img.getAttribute('data-large') ||
+                 img.getAttribute('data-src') ||
+                 img.src;
+        };
         
-        const allImages = [...document.querySelectorAll('.product-image img, .gallery img, .fotorama__img, .product-media img, [data-gallery-role="gallery"] img')]
-          .map(img => img.src || img.getAttribute('data-src') || img.getAttribute('data-full'))
-          .filter(Boolean)
-          .filter((v, i, a) => a.indexOf(v) === i); // unique
+        // Primary product image - try multiple selectors
+        let primaryImage = '';
+        const primarySelectors = [
+          '.product-image-main img',
+          '.gallery-placeholder img',
+          '.fotorama__active img',
+          '[itemprop="image"]',
+          '.product-media-gallery img:first-child',
+          '.product-image img'
+        ];
+        
+        for (const sel of primarySelectors) {
+          const img = document.querySelector(sel);
+          if (img) {
+            primaryImage = getImageUrl(img);
+            if (primaryImage) break;
+          }
+        }
+        
+        // All product images - get full resolution
+        const imageSelectors = [
+          '.product-image img',
+          '.gallery img',
+          '.fotorama__img',
+          '.product-media img',
+          '[data-gallery-role="gallery"] img',
+          '.product-image-gallery img',
+          '.thumbnails img',
+          '.product-thumbs img'
+        ];
+        
+        const allImages = [];
+        const seenUrls = new Set();
+        
+        imageSelectors.forEach(sel => {
+          document.querySelectorAll(sel).forEach(img => {
+            const url = getImageUrl(img);
+            if (url && !seenUrls.has(url)) {
+              // Skip tiny thumbnails and placeholders
+              if (!url.includes('placeholder') && !url.includes('1x1') && !url.includes('loading')) {
+                seenUrls.add(url);
+                allImages.push(url);
+              }
+            }
+          });
+        });
+        
+        // Also check for image data in JSON/scripts
+        const galleryScript = document.querySelector('[data-gallery-images], script:contains("galleryImages")');
+        if (galleryScript) {
+          try {
+            const galleryData = JSON.parse(galleryScript.textContent || galleryScript.getAttribute('data-gallery-images'));
+            if (Array.isArray(galleryData)) {
+              galleryData.forEach(img => {
+                const url = img.full || img.large || img.medium || img.url || img.src;
+                if (url && !seenUrls.has(url)) {
+                  seenUrls.add(url);
+                  allImages.push(url);
+                }
+              });
+            }
+          } catch (e) {}
+        }
+        
+        // Ensure primary is first in array
+        if (primaryImage && !allImages.includes(primaryImage)) {
+          allImages.unshift(primaryImage);
+        } else if (primaryImage) {
+          const idx = allImages.indexOf(primaryImage);
+          if (idx > 0) {
+            allImages.splice(idx, 1);
+            allImages.unshift(primaryImage);
+          }
+        }
         
         // ===== ALL SPECIFICATIONS =====
         const specifications = {};
@@ -527,11 +650,20 @@ const crawler = new PlaywrightCrawler({
         };
       });
       
-      if (!product.sku) {
-        log.warning('No SKU found, skipping');
+      // Validate SKU - CRITICAL
+      if (!product.sku || product.sku.length < 3) {
+        log.error(`❌ NO VALID SKU found at ${request.url} - SKIPPING`);
         stats.errors++;
         return;
       }
+      
+      // Validate primary image
+      if (!product.primaryImage) {
+        log.warning(`⚠️ No primary image for SKU ${product.sku}`);
+      }
+      
+      // Log SKU + image association for verification
+      log.info(`🔑 SKU: ${product.sku} | Images: ${product.images?.length || 0} | Primary: ${product.primaryImage ? 'YES' : 'NO'}`);
       
       // Add URL and brand
       product.url = request.url;
