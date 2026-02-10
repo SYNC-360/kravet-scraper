@@ -290,18 +290,45 @@ const crawler = new PlaywrightCrawler({
     if (label === 'LISTING') {
       log.info(`📋 Listing page: ${brand} (page ${request.userData.page || 1})`);
       
-      // Wait for products to load - try multiple selectors
-      await page.waitForSelector('.product-item, .product-card, .products-grid, .product-items, [data-product-id]', { timeout: 30000 }).catch(() => {});
+      // Kravet uses Algolia for product search - wait for Algolia hits to render
+      // Try multiple Algolia selectors
+      const algoliaSelectors = [
+        '.ais-Hits-item',           // InstantSearch v4 hits
+        '.ais-InfiniteHits-item',   // Infinite hits variant
+        '.hit',                     // Custom hit class
+        '[data-insights-object-id]', // Algolia insights attribute
+        '.product-item',            // Fallback Magento
+        '.algolia-result'           // Custom Algolia result
+      ];
       
-      // Additional wait for JS rendering
-      await page.waitForTimeout(3000);
+      // Wait for any Algolia content to appear
+      await page.waitForSelector(algoliaSelectors.join(', '), { timeout: 45000 }).catch(() => {
+        log.warning('No Algolia hits found, page may not have loaded');
+      });
       
-      // Get product links - Kravet uses various structures
+      // Extra wait for Algolia to finish rendering (it loads async)
+      await page.waitForTimeout(5000);
+      
+      // Debug: log what we can see
+      const pageContent = await page.content();
+      const hasAlgolia = pageContent.includes('algolia') || pageContent.includes('ais-');
+      log.info(`Page has Algolia content: ${hasAlgolia}`);
+      
+      // Take a debug screenshot
+      const screenshot = await page.screenshot({ fullPage: false });
+      await Actor.setValue(`listing-${brand}-page${request.userData.page || 1}`, screenshot, { contentType: 'image/png' });
+      log.info(`📸 Saved debug screenshot for ${brand}`);
+      
+      // Get product links - try Algolia selectors first, then Magento fallbacks
       const productLinks = await page.$$eval(
-        'a.product-item-link, a.product-item-photo, .product-item a, .product-card a, a[href*=".html"], .products-grid a',
-        links => links.map(a => a.href)
-          .filter(h => h && h.includes('.html') && !h.includes('login') && !h.includes('account'))
-          .filter((v, i, a) => a.indexOf(v) === i) // unique
+        `${algoliaSelectors.join(' a, ')} a, a.product-item-link, a[href*=".html"]`,
+        links => {
+          // Filter and dedupe
+          const urls = links
+            .map(a => a.href)
+            .filter(h => h && h.includes('.html') && !h.includes('login') && !h.includes('account') && !h.includes('cart'));
+          return [...new Set(urls)];
+        }
       );
       
       log.info(`Found ${productLinks.length} products on page`);
