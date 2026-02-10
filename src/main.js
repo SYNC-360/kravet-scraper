@@ -9,37 +9,47 @@
 import { Actor } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
 
-// Kravet brand configurations
+// Kravet brand configurations - correct URLs
 const BRANDS = {
   kravet: {
     name: 'Kravet',
     baseUrl: 'https://www.kravet.com',
-    shopUrl: 'https://www.kravet.com/shop/fabric'
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=Kravet'
   },
   leejofa: {
     name: 'Lee Jofa',
     baseUrl: 'https://www.kravet.com',
-    shopUrl: 'https://www.kravet.com/shop/fabric?brand=Lee+Jofa'
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=Lee+Jofa'
   },
   brunschwig: {
     name: 'Brunschwig & Fils',
     baseUrl: 'https://www.kravet.com',
-    shopUrl: 'https://www.kravet.com/shop/fabric?brand=Brunschwig+%26+Fils'
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=Brunschwig+%26+Fils'
   },
   gpjbaker: {
     name: 'GP & J Baker',
     baseUrl: 'https://www.kravet.com',
-    shopUrl: 'https://www.kravet.com/shop/fabric?brand=GP+%26+J+Baker'
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=GP+%26+J+Baker'
   },
   andrewmartin: {
     name: 'Andrew Martin',
     baseUrl: 'https://www.kravet.com',
-    shopUrl: 'https://www.kravet.com/shop/fabric?brand=Andrew+Martin'
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=Andrew+Martin'
   },
   coleson: {
     name: 'Cole & Son',
     baseUrl: 'https://www.kravet.com',
-    shopUrl: 'https://www.kravet.com/shop/fabric?brand=Cole+%26+Son'
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=Cole+%26+Son'
+  },
+  donghia: {
+    name: 'Donghia',
+    baseUrl: 'https://www.kravet.com',
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=Donghia'
+  },
+  kravetcontract: {
+    name: 'Kravet Contract',
+    baseUrl: 'https://www.kravet.com',
+    shopUrl: 'https://www.kravet.com/fabric?product_brand=KravetContract'
   }
 };
 
@@ -277,13 +287,18 @@ const crawler = new PlaywrightCrawler({
     if (label === 'LISTING') {
       log.info(`📋 Listing page: ${brand} (page ${request.userData.page || 1})`);
       
-      // Wait for products to load
-      await page.waitForSelector('.product-item, .product-card, [data-product-id]', { timeout: 30000 }).catch(() => {});
+      // Wait for products to load - try multiple selectors
+      await page.waitForSelector('.product-item, .product-card, .products-grid, .product-items, [data-product-id]', { timeout: 30000 }).catch(() => {});
       
-      // Get product links
+      // Additional wait for JS rendering
+      await page.waitForTimeout(3000);
+      
+      // Get product links - Kravet uses various structures
       const productLinks = await page.$$eval(
-        'a.product-item-link, a.product-card-link, .product-item a[href*="/product/"], .product-name a',
-        links => links.map(a => a.href).filter(h => h.includes('/product/') || h.includes('/fabric/'))
+        'a.product-item-link, a.product-item-photo, .product-item a, .product-card a, a[href*=".html"], .products-grid a',
+        links => links.map(a => a.href)
+          .filter(h => h && h.includes('.html') && !h.includes('login') && !h.includes('account'))
+          .filter((v, i, a) => a.indexOf(v) === i) // unique
       );
       
       log.info(`Found ${productLinks.length} products on page`);
@@ -297,11 +312,11 @@ const crawler = new PlaywrightCrawler({
         }]);
       }
       
-      // Check for next page
-      const nextPageLink = await page.$('a.next, a[rel="next"], .pages-item-next a');
+      // Check for next page - Kravet uses various pagination styles
+      const nextPageLink = await page.$('a.next, a[rel="next"], .pages-item-next a, a.action.next, li.pages-item-next a');
       if (nextPageLink && stats.byBrand[brand].scraped < maxProductsPerBrand) {
         const nextUrl = await nextPageLink.getAttribute('href');
-        if (nextUrl) {
+        if (nextUrl && nextUrl !== '#') {
           await crawler.addRequests([{
             url: nextUrl.startsWith('http') ? nextUrl : `https://www.kravet.com${nextUrl}`,
             label: 'LISTING',
